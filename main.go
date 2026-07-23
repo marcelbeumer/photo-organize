@@ -200,7 +200,7 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 		dest, status := planDestination(cfg.dest, rec, hash)
 		seen[hash] = dest
 
-		if status == statusCopied && cfg.apply {
+		if cfg.apply {
 			if err := placeFile(cfg, rec.src, dest); err != nil {
 				st.errors++
 				slog.Error("file operation failed", "src", rec.src, "dest", dest, "err", err)
