@@ -340,21 +340,42 @@ func contentHash(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:hashLen], nil
 }
 
-// copyNoClobber copies src to dst, silently skipping if dst already exists
-// (cp -n semantics). The destination is opened with O_EXCL for atomicity.
+// copyNoClobber copies src to dst. If dst already exists with the same size
+// (complete file from a prior run), it is silently skipped. A size mismatch
+// indicates a truncated file from an aborted copy — the dest is removed and
+// re-copied. The initial open uses O_EXCL for atomicity on fresh files.
 func copyNoClobber(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer in.Close()
+	srcInfo, err := in.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		if os.IsExist(err) {
-			return nil
+		if !os.IsExist(err) {
+			return fmt.Errorf("create dest: %w", err)
 		}
-		return fmt.Errorf("create dest: %w", err)
+		// dest exists — check if it's a complete copy or a truncated leftover
+		dstInfo, err := os.Stat(dst)
+		if err != nil {
+			return fmt.Errorf("stat dest: %w", err)
+		}
+		if dstInfo.Size() == srcInfo.Size() {
+			return nil // complete file from a prior run, skip
+		}
+		// truncated file from an aborted copy — remove and re-copy
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove truncated dest: %w", err)
+		}
+		out, err = os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return fmt.Errorf("recreate dest: %w", err)
+		}
 	}
 	defer out.Close()
 

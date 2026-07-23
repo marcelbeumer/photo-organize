@@ -264,7 +264,8 @@ func TestCopyNoClobber_DoesNotOverwrite(t *testing.T) {
 	src := filepath.Join(dir, "src.txt")
 	dst := filepath.Join(dir, "dst.txt")
 
-	os.WriteFile(src, []byte("new"), 0o644)
+	// same content, same size — dst is a complete copy from a prior run
+	os.WriteFile(src, []byte("original"), 0o644)
 	os.WriteFile(dst, []byte("original"), 0o644)
 
 	if err := copyNoClobber(src, dst); err != nil {
@@ -274,6 +275,25 @@ func TestCopyNoClobber_DoesNotOverwrite(t *testing.T) {
 	got, _ := os.ReadFile(dst)
 	if string(got) != "original" {
 		t.Errorf("dst overwritten: got %q, want %q", got, "original")
+	}
+}
+
+func TestCopyNoClobber_OverwritesTruncated(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dst := filepath.Join(dir, "dst.txt")
+
+	// src is complete, dst is truncated (aborted copy left only 3 of 11 bytes)
+	os.WriteFile(src, []byte("hello world"), 0o644)
+	os.WriteFile(dst, []byte("hel"), 0o644)
+
+	if err := copyNoClobber(src, dst); err != nil {
+		t.Fatalf("copyNoClobber() err = %v", err)
+	}
+
+	got, _ := os.ReadFile(dst)
+	if string(got) != "hello world" {
+		t.Errorf("dst not re-copied: got %q, want %q", got, "hello world")
 	}
 }
 
