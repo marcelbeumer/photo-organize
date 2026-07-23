@@ -89,6 +89,7 @@ type config struct {
 	dest    string
 	apply   bool
 	move    bool
+	quiet   bool
 	logPath string
 }
 
@@ -142,6 +143,7 @@ func parseFlags() config {
 	dest := flag.String("dest", "", "destination directory (required)")
 	apply := flag.Bool("apply", false, "copy/move files (default: dry-run)")
 	move := flag.Bool("move", false, "move instead of copy")
+	quiet := flag.Bool("quiet", false, "suppress per-file progress output")
 	logPath := flag.String("log", "organize.log.tsv", "log file path")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -161,6 +163,7 @@ func parseFlags() config {
 		dest:    *dest,
 		apply:   *apply,
 		move:    *move,
+		quiet:   *quiet,
 		logPath: *logPath,
 	}
 }
@@ -188,12 +191,18 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 		if err != nil {
 			st.errors++
 			fmt.Fprintf(w, "error\t%s\t\t\t\t\t%v\n", rec.src, err)
+			if !cfg.quiet {
+				fmt.Fprintf(os.Stderr, "error  %s: %v\n", rec.src, err)
+			}
 			continue
 		}
 
 		if firstDest, dup := seen[hash]; dup {
 			st.dup++
 			fmt.Fprintf(w, "skipped-dup\t%s\t%s\t\t\t%s\n", rec.src, firstDest, hash)
+			if !cfg.quiet {
+				fmt.Fprintf(os.Stderr, "dup    %s (same as %s)\n", rec.src, firstDest)
+			}
 			continue
 		}
 
@@ -205,6 +214,9 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 				st.errors++
 				slog.Error("file operation failed", "src", rec.src, "dest", dest, "err", err)
 				fmt.Fprintf(w, "error\t%s\t%s\t%s\t%s\t%s\t%v\n", rec.src, dest, rec.date, rec.dateTag, hash, err)
+				if !cfg.quiet {
+					fmt.Fprintf(os.Stderr, "error  %s -> %s: %v\n", rec.src, dest, err)
+				}
 				continue
 			}
 		}
@@ -217,6 +229,16 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 		}
 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", status, rec.src, dest, rec.date, rec.dateTag, hash)
+		if !cfg.quiet {
+			prefix := "copy  "
+			if status == statusNoDate {
+				prefix = "nodate"
+			}
+			if !cfg.apply {
+				prefix = "dry   "
+			}
+			fmt.Fprintf(os.Stderr, "%s  %s -> %s\n", prefix, rec.src, dest)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {

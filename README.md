@@ -30,6 +30,7 @@ Flags:
 - `--dest` — destination directory (required)
 - `--apply` — copy/move files (default: dry-run)
 - `--move` — move instead of copy
+- `--quiet` — suppress per-file progress output to stderr
 - `--log` — log file path (default `organize.log.tsv`)
 
 ## Output layout
