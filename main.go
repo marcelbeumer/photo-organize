@@ -122,12 +122,16 @@ func main() {
 	}
 	defer logFile.Close()
 
-	records, err := extractMetadata(cfg.src)
+	scanner, waitFn, err := startExiftool(cfg.src)
 	if err != nil {
 		fatalf("exiftool failed: %v", err)
 	}
 
-	st := process(cfg, records, logFile)
+	st := process(cfg, scanner, logFile)
+	if err := waitFn(); err != nil {
+		fatalf("exiftool exited with error: %v", err)
+	}
+
 	printSummary(cfg, st)
 }
 
@@ -161,17 +165,21 @@ func parseFlags() config {
 	}
 }
 
-// process iterates over records, computes hashes, detects duplicates, and
-// copies/moves files when cfg.apply is set. Every action is logged to logFile.
-func process(cfg config, records []fileRecord, logFile *os.File) stats {
+// process streams exiftool output line-by-line, hashing and copying/moving
+// each file as its metadata arrives. Every action is logged to logFile.
+func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 	w := bufio.NewWriter(logFile)
 	defer w.Flush()
 	fmt.Fprintln(w, "status\tsrc\tdest\tdate\tdateSourceTag\thash")
 
 	var st stats
-	seen := make(map[string]string, len(records)) // hash -> first destination path
+	seen := make(map[string]string) // hash -> first destination path
 
-	for _, rec := range records {
+	for scanner.Scan() {
+		rec, ok := parseExifLine(scanner.Text())
+		if !ok {
+			continue
+		}
 		if isJunk(rec.src, rec.ext) {
 			continue
 		}
@@ -211,6 +219,10 @@ func process(cfg config, records []fileRecord, logFile *os.File) stats {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", status, rec.src, dest, rec.date, rec.dateTag, hash)
 	}
 
+	if err := scanner.Err(); err != nil {
+		fatalf("read exiftool output: %v", err)
+	}
+
 	return st
 }
 
@@ -245,10 +257,10 @@ func placeFile(cfg config, src, dest string) error {
 	return copyNoClobber(src, dest)
 }
 
-// extractMetadata runs exiftool once over the source directory and parses
-// the TSV output into fileRecords. exiftool's -f flag makes missing tags
+// startExiftool launches exiftool and returns a scanner over its TSV output
+// and a function to wait for its exit. exiftool's -f flag makes missing tags
 // print as "-" instead of suppressing the line, so column count is stable.
-func extractMetadata(src string) ([]fileRecord, error) {
+func startExiftool(src string) (*bufio.Scanner, func() error, error) {
 	cmd := exec.Command("exiftool",
 		"-q", "-q",
 		"-f",
@@ -261,31 +273,18 @@ func extractMetadata(src string) ([]fileRecord, error) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("pipe exiftool stdout: %w", err)
+		return nil, nil, fmt.Errorf("pipe exiftool stdout: %w", err)
 	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start exiftool: %w", err)
+		return nil, nil, fmt.Errorf("start exiftool: %w", err)
 	}
 
-	var records []fileRecord
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		rec, ok := parseExifLine(scanner.Text())
-		if !ok {
-			continue
-		}
-		records = append(records, rec)
-	}
+	waitFn := func() error { return cmd.Wait() }
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read exiftool output: %w", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("exiftool exited with error: %w", err)
-	}
-	return records, nil
+	return scanner, waitFn, nil
 }
 
 // parseExifLine parses one TSV line from exiftool's -p output.
