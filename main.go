@@ -132,9 +132,10 @@ func main() {
 }
 
 // parseFlags reads CLI flags and returns a populated config.
+// --src and --dest are required; --log defaults to organize.log.tsv.
 func parseFlags() config {
-	src := flag.String("src", "./photo-sample", "source directory")
-	dest := flag.String("dest", "./photo-organized", "destination directory")
+	src := flag.String("src", "", "source directory (required)")
+	dest := flag.String("dest", "", "destination directory (required)")
 	apply := flag.Bool("apply", false, "copy/move files (default: dry-run)")
 	move := flag.Bool("move", false, "move instead of copy")
 	logPath := flag.String("log", "organize.log.tsv", "log file path")
@@ -145,6 +146,12 @@ func parseFlags() config {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *src == "" || *dest == "" {
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	return config{
 		src:     *src,
 		dest:    *dest,

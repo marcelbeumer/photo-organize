@@ -26,8 +26,8 @@ copies or moves nothing.
 
 Flags:
 
-- `--src` — source directory (default `./photo-sample`)
-- `--dest` — destination directory (default `./photo-organized`)
+- `--src` — source directory (required)
+- `--dest` — destination directory (required)
 - `--apply` — copy/move files (default: dry-run)
 - `--move` — move instead of copy
 - `--log` — log file path (default `organize.log.tsv`)
