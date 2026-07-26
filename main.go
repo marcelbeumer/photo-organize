@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	photo-organize --src DIR --dest DIR [--apply] [--move] [--log FILE]
+//	photo-organize --src DIR --dest DIR [--apply] [--move] [--keep-names] [--log FILE]
 //
 // Without --apply the tool runs in dry-run mode: it logs what it would do
 // but copies or moves nothing.
@@ -13,6 +13,11 @@
 //
 //	<dest>/<YYYY>/<MM>/<YYYY-MM-DD>-<HHMMSS>-<sha1[12]>.<ext>
 //	<dest>/unknown/<sha1[12]>.<ext>   (when no date is recoverable)
+//
+// With --keep-names the original filename is preserved instead of the
+// date+hash name. Two different files sharing an original name in the
+// same month bucket collide: the second overwrites the first and is
+// logged as dup-recopy for human review.
 //
 // Install exiftool:
 //
@@ -90,12 +95,13 @@ var junkBases = map[string]bool{
 
 // config holds the resolved CLI flags.
 type config struct {
-	src     string
-	dest    string
-	apply   bool
-	move    bool
-	quiet   bool
-	logPath string
+	src       string
+	dest      string
+	apply     bool
+	move      bool
+	quiet     bool
+	keepNames bool
+	logPath   string
 }
 
 // stats tracks the outcome of processing each file. Each status has its
@@ -153,11 +159,12 @@ func parseFlags() config {
 	apply := flag.Bool("apply", false, "copy/move files (default: dry-run)")
 	move := flag.Bool("move", false, "move instead of copy")
 	quiet := flag.Bool("quiet", false, "suppress per-file progress output")
+	keepNames := flag.Bool("keep-names", false, "preserve original filenames instead of <date>-<hash>.<ext>")
 	logPath := flag.String("log", "organize.log.tsv", "log file path")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
 		fmt.Fprintf(out, "photo-organize: organize photos by capture date\n\n")
-		fmt.Fprintf(out, "Usage: %s --src DIR --dest DIR [--apply] [--move] [--log FILE]\n\n", os.Args[0])
+		fmt.Fprintf(out, "Usage: %s --src DIR --dest DIR [--apply] [--move] [--keep-names] [--log FILE]\n\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -168,12 +175,13 @@ func parseFlags() config {
 	}
 
 	return config{
-		src:     *src,
-		dest:    *dest,
-		apply:   *apply,
-		move:    *move,
-		quiet:   *quiet,
-		logPath: *logPath,
+		src:       *src,
+		dest:      *dest,
+		apply:     *apply,
+		move:      *move,
+		quiet:     *quiet,
+		keepNames: *keepNames,
+		logPath:   *logPath,
 	}
 }
 
@@ -196,17 +204,23 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 			continue
 		}
 
-		hash, err := contentHash(rec.src)
-		if err != nil {
-			st.errors++
-			fmt.Fprintf(w, "%s\t%s\t\t\t\t\t%v\n", statusError, rec.src, err)
-			if !cfg.quiet {
-				fmt.Fprintf(os.Stderr, "error  %s: %v\n", rec.src, err)
+		// Hashing is skipped in --keep-names mode: the original filename is
+		// used as-is and dedup is purely path/size based.
+		var hash string
+		if !cfg.keepNames {
+			h, err := contentHash(rec.src)
+			if err != nil {
+				st.errors++
+				fmt.Fprintf(w, "%s\t%s\t\t\t\t\t%v\n", statusError, rec.src, err)
+				if !cfg.quiet {
+					fmt.Fprintf(os.Stderr, "error  %s: %v\n", rec.src, err)
+				}
+				continue
 			}
-			continue
+			hash = h
 		}
 
-		dest, baseStatus := planDestination(cfg.dest, rec, hash)
+		dest, baseStatus := planDestination(cfg.dest, rec, hash, cfg.keepNames)
 
 		withinRunDup := seen[dest]
 		seen[dest] = true
@@ -324,20 +338,34 @@ func statusPrefix(status string, apply bool) string {
 // planDestination computes the target path and status for a record.
 // A valid date yields a path under <dest>/<YYYY>/<MM>/; missing or
 // unparseable dates are bucketed under <dest>/unknown/.
-func planDestination(dest string, rec fileRecord, hash string) (path, status string) {
+//
+// When keepNames is set, the original filename is preserved as-is instead of
+// the default <date>-<hash>.<ext> name. Two different files sharing an
+// original name in the same month bucket collide: the second is logged as
+// dup-recopy and overwrites the first (human reviews the log).
+func planDestination(dest string, rec fileRecord, hash string, keepNames bool) (path, status string) {
 	parsed, err := time.Parse(dateLayout, rec.date)
 	if err != nil {
 		if rec.date != "" {
 			slog.Warn("unparseable date, bucketing as unknown", "src", rec.src, "date", rec.date, "err", err)
 		}
-		return filepath.Join(dest, "unknown", hash+"."+rec.ext), statusNoDate
+		name := hash + "." + rec.ext
+		if keepNames {
+			name = filepath.Base(rec.src)
+		}
+		return filepath.Join(dest, "unknown", name), statusNoDate
 	}
 
-	name := fmt.Sprintf(
-		"%s-%s.%s",
-		parsed.Format("2006-01-02-150405"),
-		hash, rec.ext,
-	)
+	var name string
+	if keepNames {
+		name = filepath.Base(rec.src)
+	} else {
+		name = fmt.Sprintf(
+			"%s-%s.%s",
+			parsed.Format("2006-01-02-150405"),
+			hash, rec.ext,
+		)
+	}
 	full := filepath.Join(dest, parsed.Format("2006"), parsed.Format("01"), name)
 	return full, statusCopied
 }

@@ -18,7 +18,7 @@ Requires [exiftool](https://exiftool.org/):
 ## Usage
 
 ```
-photo-organize --src DIR --dest DIR [--apply] [--move] [--log FILE]
+photo-organize --src DIR --dest DIR [--apply] [--move] [--keep-names] [--log FILE]
 ```
 
 Without `--apply` the tool runs in dry-run mode: it logs what it would do but
@@ -31,6 +31,7 @@ Flags:
 - `--apply` — copy/move files (default: dry-run)
 - `--move` — move instead of copy
 - `--quiet` — suppress per-file progress output to stderr
+- `--keep-names` — preserve original filenames instead of `<date>-<hash>.<ext>`
 - `--log` — log file path (default `organize.log.tsv`)
 
 ## Output layout
@@ -39,6 +40,18 @@ Flags:
 <dest>/<YYYY>/<MM>/<YYYY-MM-DD>-<HHMMSS>-<sha1[12]>.<ext>
 <dest>/unknown/<sha1[12]>.<ext>   (when no date is recoverable)
 ```
+
+With `--keep-names`, the original filename is preserved instead of the
+date+hash name:
+
+```
+<dest>/<YYYY>/<MM>/<originalname.ext>
+<dest>/unknown/<originalname.ext>   (when no date is recoverable)
+```
+
+Note: under `--keep-names`, two different files sharing an original name in
+the same month bucket collide. The second overwrites the first and is logged
+as `dup-recopy` for human review. This is the tradeoff of preserving names.
 
 The 12-character sha1 prefix makes filenames content-based: identical files
 always produce the same name, enabling automatic deduplication across source

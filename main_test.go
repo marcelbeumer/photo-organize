@@ -78,6 +78,7 @@ func TestPlanDestination(t *testing.T) {
 		dest       string
 		rec        fileRecord
 		hash       string
+		keepNames  bool
 		wantPath   string
 		wantStatus string
 	}{
@@ -121,11 +122,41 @@ func TestPlanDestination(t *testing.T) {
 			wantPath:   "/output/2003/11/2003-11-05-085231-077ea54d1509.jpg",
 			wantStatus: "copied",
 		},
+		// --keep-names: original filename preserved under dated bucket.
+		{
+			name:       "keep-names dated",
+			dest:       "/output",
+			rec:        fileRecord{src: "photos/IMG_001.jpg", date: "2020:05:23_14:23:01", dateTag: "DateTimeOriginal", ext: "jpg"},
+			hash:       "",
+			keepNames:  true,
+			wantPath:   "/output/2020/05/IMG_001.jpg",
+			wantStatus: "copied",
+		},
+		// --keep-names: no-date file keeps original name under unknown/.
+		{
+			name:       "keep-names no-date",
+			dest:       "/output",
+			rec:        fileRecord{src: "photos/nodate.bin", date: "", dateTag: "", ext: "bin"},
+			hash:       "",
+			keepNames:  true,
+			wantPath:   "/output/unknown/nodate.bin",
+			wantStatus: "no-date",
+		},
+		// --keep-names: original filename with mixed case is preserved as-is.
+		{
+			name:       "keep-names preserves mixed-case name",
+			dest:       "/output",
+			rec:        fileRecord{src: "photos/15.JPG", date: "2003:11:05_08:52:31", dateTag: "IFD0:ModifyDate", ext: "jpg"},
+			hash:       "",
+			keepNames:  true,
+			wantPath:   "/output/2003/11/15.JPG",
+			wantStatus: "copied",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, status := planDestination(tt.dest, tt.rec, tt.hash)
+			path, status := planDestination(tt.dest, tt.rec, tt.hash, tt.keepNames)
 			if path != tt.wantPath {
 				t.Errorf("path = %q, want %q", path, tt.wantPath)
 			}
