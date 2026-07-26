@@ -42,7 +42,10 @@ import (
 
 // exiftoolDateFormat is the strftime-style format passed to exiftool's -d flag.
 // exiftool uses C/strftime %Y%m%d tokens, not Go's reference-time layout.
-const exiftoolDateFormat = "%Y:%m:%d_%H:%M:%S"
+// The %L suffix requests sub-second precision so SubSecDateTimeOriginal emits
+// its fractional component; non-sub-second tags may pad with .000 or omit the
+// suffix entirely. stripSubsec normalizes both forms before Go parses.
+const exiftoolDateFormat = "%Y:%m:%d_%H:%M:%S.%L"
 
 // dateLayout is the Go time.Parse layout matching exiftoolDateFormat output.
 const dateLayout = "2006:01:02_15:04:05"
@@ -66,15 +69,17 @@ const (
 // The first non-"-" value wins. Order matters: embedded capture dates first,
 // filesystem timestamps as last resort.
 var dateFallbackChain = []string{
-	"DateTimeOriginal",     // EXIF capture date (cameras, phones)
-	"CreateDate",           // EXIF/MOV creation date
-	"IFD0:ModifyDate",      // TIFF/Photoshop modify date (e.g. scanned prints)
-	"XMP:ModifyDate",       // XMP modify date
-	"XMP:DateTimeOriginal", // XMP capture date (Lightroom edits)
-	"TrackCreateDate",      // video track creation date
-	"QuickTime:CreateDate", // QuickTime container creation date (corrected by -api QuickTimeUTC)
-	"FileModifyDate",       // filesystem mtime (last resort)
-	"FileCreateDate",       // filesystem ctime (last resort)
+	"SubSecDateTimeOriginal", // sub-second EXIF capture (iPhone burst)
+	"DateTimeOriginal",       // EXIF capture date (cameras, phones)
+	"CreateDate",             // EXIF/MOV creation date
+	"IFD0:ModifyDate",        // TIFF/Photoshop modify date (e.g. scanned prints)
+	"XMP:DateTimeOriginal",   // XMP capture date (Lightroom edits)
+	"XMP:CreateDate",         // XMP creation date (Apple Photos import, WhatsApp fallback)
+	"XMP:ModifyDate",         // XMP modify date
+	"TrackCreateDate",        // video track creation date
+	"QuickTime:CreateDate",   // QuickTime container creation date (corrected by -api QuickTimeUTC)
+	"FileModifyDate",         // filesystem mtime (last resort)
+	"FileCreateDate",         // filesystem ctime (last resort)
 }
 
 // junkExts are file extensions (lowercase, without dot) to skip entirely.
@@ -344,7 +349,7 @@ func statusPrefix(status string, apply bool) string {
 // original name in the same month bucket collide: the second is logged as
 // dup-recopy and overwrites the first (human reviews the log).
 func planDestination(dest string, rec fileRecord, hash string, keepNames bool) (path, status string) {
-	parsed, err := time.Parse(dateLayout, rec.date)
+	parsed, err := time.Parse(dateLayout, stripSubsec(rec.date))
 	if err != nil {
 		if rec.date != "" {
 			slog.Warn("unparseable date, bucketing as unknown", "src", rec.src, "date", rec.date, "err", err)
@@ -368,6 +373,25 @@ func planDestination(dest string, rec fileRecord, hash string, keepNames bool) (
 	}
 	full := filepath.Join(dest, parsed.Format("2006"), parsed.Format("01"), name)
 	return full, statusCopied
+}
+
+// stripSubsec removes an optional trailing ".<digits>" fractional-seconds
+// suffix from an exiftool date string. exiftool's %L format may emit .123
+// (real sub-seconds), .000 (padded for tags without sub-second data), or omit
+// the suffix entirely depending on the tag and exiftool version. All three
+// forms normalize to the same second-precision value for time.Parse against
+// dateLayout. A trailing "." with no following digits is left intact.
+func stripSubsec(s string) string {
+	i := strings.LastIndexByte(s, '.')
+	if i < 0 || i == len(s)-1 {
+		return s
+	}
+	for _, r := range s[i+1:] {
+		if r < '0' || r > '9' {
+			return s
+		}
+	}
+	return s[:i]
 }
 
 // placeFile creates the target directory and copies or moves the source file.

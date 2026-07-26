@@ -62,16 +62,21 @@ directories. Re-running is a safe no-op.
 The tool resolves the capture date by checking exiftool tags in order, using
 the first non-empty value:
 
-1. `DateTimeOriginal` — EXIF capture date (cameras, phones)
-2. `CreateDate` — EXIF/MOV creation date
-3. `IFD0:ModifyDate` — TIFF/Photoshop modify date (e.g. scanned prints)
-4. `XMP:ModifyDate` — XMP modify date
+1. `SubSecDateTimeOriginal` — sub-second EXIF capture (iPhone burst)
+2. `DateTimeOriginal` — EXIF capture date (cameras, phones)
+3. `CreateDate` — EXIF/MOV creation date
+4. `IFD0:ModifyDate` — TIFF/Photoshop modify date (e.g. scanned prints)
 5. `XMP:DateTimeOriginal` — XMP capture date (Lightroom edits)
-6. `TrackCreateDate` — video track creation date
-7. `QuickTime:CreateDate` — QuickTime container creation date (corrected to local time via `-api QuickTimeUTC`)
-8. `FileModifyDate` — filesystem mtime (last resort)
-9. `FileCreateDate` — filesystem ctime (last resort)
+6. `XMP:CreateDate` — XMP creation date (Apple Photos import, WhatsApp fallback)
+7. `XMP:ModifyDate` — XMP modify date
+8. `TrackCreateDate` — video track creation date
+9. `QuickTime:CreateDate` — QuickTime container creation date (corrected to local time via `-api QuickTimeUTC`)
+10. `FileModifyDate` — filesystem mtime (last resort)
+11. `FileCreateDate` — filesystem ctime (last resort)
 
 Files with no recoverable date are placed in `unknown/`.
+
+`XMP:CreateDate` is the save date for EXIF-stripped media like WhatsApp, not
+the true capture date. Check `dateSourceTag` in the log to identify these.
 
 The log file (TSV) records the source tag for each file so dates can be audited.

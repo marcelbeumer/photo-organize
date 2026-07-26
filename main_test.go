@@ -8,6 +8,11 @@ import (
 )
 
 func TestParseExifLine(t *testing.T) {
+	// Column order matches dateFallbackChain (11 tags) + path + ext = 13 cols:
+	//   path \t SubSecDateTimeOriginal \t DateTimeOriginal \t CreateDate
+	//   \t IFD0:ModifyDate \t XMP:DateTimeOriginal \t XMP:CreateDate
+	//   \t XMP:ModifyDate \t TrackCreateDate \t QuickTime:CreateDate
+	//   \t FileModifyDate \t FileCreateDate \t ext
 	tests := []struct {
 		name string
 		line string
@@ -16,31 +21,49 @@ func TestParseExifLine(t *testing.T) {
 	}{
 		{
 			name: "DateTimeOriginal wins",
-			line: "photos/IMG_001.jpg\t2020:05:23_14:23:01\t-\t-\t-\t-\t-\t-\t-\t-\tjpg",
+			line: "photos/IMG_001.jpg\t-\t2020:05:23_14:23:01\t-\t-\t-\t-\t-\t-\t-\t-\t-\tjpg",
 			want: fileRecord{src: "photos/IMG_001.jpg", date: "2020:05:23_14:23:01", dateTag: "DateTimeOriginal", ext: "jpg"},
 			ok:   true,
 		},
 		{
-			name: "fallback to IFD0:ModifyDate (third column)",
-			line: "photos/scan.tif\t-\t-\t2003:11:05_08:52:31\t-\t-\t-\t-\t-\t-\ttif",
+			name: "SubSecDateTimeOriginal wins (burst photo)",
+			line: "photos/burst.heic\t2024:03:15_14:23:01.123\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\theic",
+			want: fileRecord{src: "photos/burst.heic", date: "2024:03:15_14:23:01.123", dateTag: "SubSecDateTimeOriginal", ext: "heic"},
+			ok:   true,
+		},
+		{
+			name: "fallback to IFD0:ModifyDate (fourth column)",
+			line: "photos/scan.tif\t-\t-\t-\t2003:11:05_08:52:31\t-\t-\t-\t-\t-\t-\t-\ttif",
 			want: fileRecord{src: "photos/scan.tif", date: "2003:11:05_08:52:31", dateTag: "IFD0:ModifyDate", ext: "tif"},
 			ok:   true,
 		},
 		{
-			name: "fallback to FileModifyDate (eighth column)",
-			line: "photos/nodate.jpg\t-\t-\t-\t-\t-\t-\t-\t2020:05:23_04:01:00\t-\tjpg",
+			name: "XMP:DateTimeOriginal beats XMP:ModifyDate",
+			line: "photos/xmp.jpg\t-\t-\t-\t-\t2020:05:23_14:23:01\t-\t2020:05:24_10:00:00\t-\t-\t-\t-\tjpg",
+			want: fileRecord{src: "photos/xmp.jpg", date: "2020:05:23_14:23:01", dateTag: "XMP:DateTimeOriginal", ext: "jpg"},
+			ok:   true,
+		},
+		{
+			name: "XMP:CreateDate fallback (WhatsApp, EXIF stripped)",
+			line: "whatsapp/IMG-2022.jpg\t-\t-\t-\t-\t-\t2022:08:01_10:15:00\t-\t-\t-\t-\t-\tjpg",
+			want: fileRecord{src: "whatsapp/IMG-2022.jpg", date: "2022:08:01_10:15:00", dateTag: "XMP:CreateDate", ext: "jpg"},
+			ok:   true,
+		},
+		{
+			name: "fallback to FileModifyDate (tenth column)",
+			line: "photos/nodate.jpg\t-\t-\t-\t-\t-\t-\t-\t-\t-\t2020:05:23_04:01:00\t-\tjpg",
 			want: fileRecord{src: "photos/nodate.jpg", date: "2020:05:23_04:01:00", dateTag: "FileModifyDate", ext: "jpg"},
 			ok:   true,
 		},
 		{
 			name: "all dates missing",
-			line: "photos/unknown.bin\t-\t-\t-\t-\t-\t-\t-\t-\t-\tbin",
+			line: "photos/unknown.bin\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\tbin",
 			want: fileRecord{src: "photos/unknown.bin", date: "", dateTag: "", ext: "bin"},
 			ok:   true,
 		},
 		{
 			name: "QuickTime:CreateDate for video",
-			line: "video/clip.mov\t-\t2014:12:31_23:09:08\t-\t-\t-\t2014:12:31_23:09:08\t2014:12:31_23:09:08\t-\t-\tmov",
+			line: "video/clip.mov\t-\t-\t2014:12:31_23:09:08\t-\t-\t-\t-\t2014:12:31_23:09:08\t2014:12:31_23:09:08\t-\t-\tmov",
 			want: fileRecord{src: "video/clip.mov", date: "2014:12:31_23:09:08", dateTag: "CreateDate", ext: "mov"},
 			ok:   true,
 		},
@@ -150,6 +173,24 @@ func TestPlanDestination(t *testing.T) {
 			hash:       "",
 			keepNames:  true,
 			wantPath:   "/output/2003/11/15.JPG",
+			wantStatus: "copied",
+		},
+		// Sub-second variants: the parser strips ".<digits>" before time.Parse,
+		// so the filename drops sub-seconds regardless of input form.
+		{
+			name:       "sub-second .123 in date drops to second-level filename",
+			dest:       "/output",
+			rec:        fileRecord{src: "photos/burst.heic", date: "2024:03:15_14:23:01.123", dateTag: "SubSecDateTimeOriginal", ext: "heic"},
+			hash:       "abc123def456",
+			wantPath:   "/output/2024/03/2024-03-15-142301-abc123def456.heic",
+			wantStatus: "copied",
+		},
+		{
+			name:       "sub-second .000 padding drops to second-level filename",
+			dest:       "/output",
+			rec:        fileRecord{src: "photos/padded.jpg", date: "2020:05:23_14:23:01.000", dateTag: "DateTimeOriginal", ext: "jpg"},
+			hash:       "a3f9c2e8b1d4",
+			wantPath:   "/output/2020/05/2020-05-23-142301-a3f9c2e8b1d4.jpg",
 			wantStatus: "copied",
 		},
 	}
@@ -435,5 +476,24 @@ func TestUndoStatus(t *testing.T) {
 	undoStatus(&st, statusNoDateRecopy)
 	if st != (stats{}) {
 		t.Errorf("stats not zeroed: %+v", st)
+	}
+}
+
+func TestStripSubsec(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"2024:03:15_14:23:01", "2024:03:15_14:23:01"},     // no fraction
+		{"2024:03:15_14:23:01.123", "2024:03:15_14:23:01"}, // real sub-seconds
+		{"2024:03:15_14:23:01.000", "2024:03:15_14:23:01"}, // padded
+		{"2024:03:15_14:23:01.", "2024:03:15_14:23:01."},   // trailing dot, no digits — left intact
+		{"", ""}, // empty
+		{"2024:03:15_14:23:01.12a", "2024:03:15_14:23:01.12a"}, // non-digit after dot — left intact
+	}
+	for _, tt := range tests {
+		got := stripSubsec(tt.in)
+		if got != tt.want {
+			t.Errorf("stripSubsec(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
