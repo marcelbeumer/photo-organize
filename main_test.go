@@ -86,7 +86,7 @@ func TestPlanDestination(t *testing.T) {
 			dest:       "/output",
 			rec:        fileRecord{src: "photos/IMG_001.jpg", date: "2020:05:23_14:23:01", dateTag: "DateTimeOriginal", ext: "jpg"},
 			hash:       "a3f9c2e8b1d4",
-			wantPath:   "/output/2020-05/2020-05-23-142301-a3f9c2e8b1d4.jpg",
+			wantPath:   "/output/2020/05/2020-05-23-142301-a3f9c2e8b1d4.jpg",
 			wantStatus: "copied",
 		},
 		{
@@ -94,7 +94,7 @@ func TestPlanDestination(t *testing.T) {
 			dest:       "/photos",
 			rec:        fileRecord{src: "video/clip.mov", date: "2014:12:31_23:09:08", dateTag: "CreateDate", ext: "mov"},
 			hash:       "3123113e3cc4",
-			wantPath:   "/photos/2014-12/2014-12-31-230908-3123113e3cc4.mov",
+			wantPath:   "/photos/2014/12/2014-12-31-230908-3123113e3cc4.mov",
 			wantStatus: "copied",
 		},
 		{
@@ -118,7 +118,7 @@ func TestPlanDestination(t *testing.T) {
 			dest:       "/output",
 			rec:        fileRecord{src: "photos/15.JPG", date: "2003:11:05_08:52:31", dateTag: "IFD0:ModifyDate", ext: "jpg"},
 			hash:       "077ea54d1509",
-			wantPath:   "/output/2003-11/2003-11-05-085231-077ea54d1509.jpg",
+			wantPath:   "/output/2003/11/2003-11-05-085231-077ea54d1509.jpg",
 			wantStatus: "copied",
 		},
 	}

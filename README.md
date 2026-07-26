@@ -36,7 +36,7 @@ Flags:
 ## Output layout
 
 ```
-<dest>/<YYYY>-<MM>/<YYYY-MM-DD>-<HHMMSS>-<sha1[12]>.<ext>
+<dest>/<YYYY>/<MM>/<YYYY-MM-DD>-<HHMMSS>-<sha1[12]>.<ext>
 <dest>/unknown/<sha1[12]>.<ext>   (when no date is recoverable)
 ```
 

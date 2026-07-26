@@ -264,7 +264,7 @@ func planDestination(dest string, rec fileRecord, hash string) (path, status str
 		parsed.Format("2006-01-02-150405"),
 		hash, rec.ext,
 	)
-	full := filepath.Join(dest, parsed.Format("2006-01"), name)
+	full := filepath.Join(dest, parsed.Format("2006"), parsed.Format("01"), name)
 	return full, statusCopied
 }
 
