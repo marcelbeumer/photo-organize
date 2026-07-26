@@ -409,11 +409,15 @@ func placeFile(cfg config, src, dest string) error {
 // startExiftool launches exiftool and returns a scanner over its TSV output
 // and a function to wait for its exit. exiftool's -f flag makes missing tags
 // print as "-" instead of suppressing the line, so column count is stable.
+// -r recurses into subdirectories. src is passed through verbatim, so the
+// ${Directory} column (and thus rec.src) inherits the caller's form:
+// relative --src yields relative paths in the log, absolute yields absolute.
 func startExiftool(src string) (*bufio.Scanner, func() error, error) {
 	cmd := exec.Command(
 		"exiftool",
 		"-q", "-q",
 		"-f",
+		"-r",
 		"-p", exiftoolFormat(),
 		"-api", "QuickTimeUTC",
 		"-d", exiftoolDateFormat,

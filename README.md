@@ -21,6 +21,8 @@ Requires [exiftool](https://exiftool.org/):
 photo-organize --src DIR --dest DIR [--apply] [--move] [--keep-names] [--log FILE]
 ```
 
+`--src` is scanned recursively: all files in subdirectories are included.
+
 Without `--apply` the tool runs in dry-run mode: it logs what it would do but
 copies or moves nothing.
 
