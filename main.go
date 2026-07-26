@@ -42,10 +42,11 @@ import (
 
 // exiftoolDateFormat is the strftime-style format passed to exiftool's -d flag.
 // exiftool uses C/strftime %Y%m%d tokens, not Go's reference-time layout.
-// The %L suffix requests sub-second precision so SubSecDateTimeOriginal emits
-// its fractional component; non-sub-second tags may pad with .000 or omit the
-// suffix entirely. stripSubsec normalizes both forms before Go parses.
-const exiftoolDateFormat = "%Y:%m:%d_%H:%M:%S.%L"
+// The %3f token requests sub-second precision (3 digits, exiftool emits the
+// leading dot itself, so no "." before %3f) so SubSecDateTimeOriginal emits its
+// fractional component; non-sub-second tags pad with .000. stripSubsec
+// normalizes both forms before Go parses against dateLayout.
+const exiftoolDateFormat = "%Y:%m:%d_%H:%M:%S%3f"
 
 // dateLayout is the Go time.Parse layout matching exiftoolDateFormat output.
 const dateLayout = "2006:01:02_15:04:05"
