@@ -48,8 +48,13 @@ const hashLen = 12
 
 // Processing status values written to the log.
 const (
-	statusCopied = "copied"
-	statusNoDate = "no-date"
+	statusCopied       = "copied"
+	statusNoDate       = "no-date"
+	statusSkippedDup   = "skipped-dup"
+	statusRecopy       = "recopy"
+	statusDupRecopy    = "dup-recopy"
+	statusNoDateRecopy = "no-date-recopy"
+	statusError        = "error"
 )
 
 // dateFallbackChain defines the exiftool tag columns emitted in TSV order.
@@ -93,12 +98,16 @@ type config struct {
 	logPath string
 }
 
-// stats tracks the outcome of processing each file.
+// stats tracks the outcome of processing each file. Each status has its
+// own counter; no shared increments.
 type stats struct {
-	copied int
-	dup    int
-	noDate int
-	errors int
+	copied       int
+	noDate       int
+	skippedDup   int
+	recopy       int
+	dupRecopy    int
+	noDateRecopy int
+	errors       int
 }
 
 // fileRecord holds the parsed exiftool output for a single source file.
@@ -176,7 +185,7 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 	fmt.Fprintln(w, "status\tsrc\tdest\tdate\tdateSourceTag\thash")
 
 	var st stats
-	seen := make(map[string]string) // hash -> first destination path
+	seen := make(map[string]bool) // dest path -> seen this run
 
 	for scanner.Scan() {
 		rec, ok := parseExifLine(scanner.Text())
@@ -190,30 +199,65 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 		hash, err := contentHash(rec.src)
 		if err != nil {
 			st.errors++
-			fmt.Fprintf(w, "error\t%s\t\t\t\t\t%v\n", rec.src, err)
+			fmt.Fprintf(w, "%s\t%s\t\t\t\t\t%v\n", statusError, rec.src, err)
 			if !cfg.quiet {
 				fmt.Fprintf(os.Stderr, "error  %s: %v\n", rec.src, err)
 			}
 			continue
 		}
 
-		if firstDest, dup := seen[hash]; dup {
-			st.dup++
-			fmt.Fprintf(w, "skipped-dup\t%s\t%s\t\t\t%s\n", rec.src, firstDest, hash)
+		dest, baseStatus := planDestination(cfg.dest, rec, hash)
+
+		withinRunDup := seen[dest]
+		seen[dest] = true
+
+		recopyNeeded, err := sizesDiffer(rec.src, dest)
+		if err != nil {
+			st.errors++
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%v\n", statusError, rec.src, dest, rec.date, rec.dateTag, hash, err)
 			if !cfg.quiet {
-				fmt.Fprintf(os.Stderr, "dup    %s (same as %s)\n", rec.src, firstDest)
+				fmt.Fprintf(os.Stderr, "error  %s -> %s: %v\n", rec.src, dest, err)
 			}
 			continue
 		}
 
-		dest, status := planDestination(cfg.dest, rec, hash)
-		seen[hash] = dest
+		// Decide the final status from the 7-row table.
+		status := baseStatus // "copied" or "no-date"
+		switch {
+		case withinRunDup && recopyNeeded:
+			status = statusDupRecopy
+		case withinRunDup && !recopyNeeded:
+			status = statusSkippedDup
+		case !withinRunDup && recopyNeeded && baseStatus == statusCopied:
+			status = statusRecopy
+		case !withinRunDup && recopyNeeded && baseStatus == statusNoDate:
+			status = statusNoDateRecopy
+		}
 
-		if cfg.apply {
+		// Tally the per-status counter.
+		switch status {
+		case statusCopied:
+			st.copied++
+		case statusNoDate:
+			st.noDate++
+		case statusSkippedDup:
+			st.skippedDup++
+		case statusRecopy:
+			st.recopy++
+		case statusDupRecopy:
+			st.dupRecopy++
+		case statusNoDateRecopy:
+			st.noDateRecopy++
+		}
+
+		// skipped-dup places nothing; everything else (when --apply) does.
+		if status != statusSkippedDup && cfg.apply {
 			if err := placeFile(cfg, rec.src, dest); err != nil {
+				// Replace the planned status with error and retally.
+				undoStatus(&st, status)
 				st.errors++
 				slog.Error("file operation failed", "src", rec.src, "dest", dest, "err", err)
-				fmt.Fprintf(w, "error\t%s\t%s\t%s\t%s\t%s\t%v\n", rec.src, dest, rec.date, rec.dateTag, hash, err)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%v\n", statusError, rec.src, dest, rec.date, rec.dateTag, hash, err)
 				if !cfg.quiet {
 					fmt.Fprintf(os.Stderr, "error  %s -> %s: %v\n", rec.src, dest, err)
 				}
@@ -221,22 +265,9 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 			}
 		}
 
-		switch status {
-		case statusCopied:
-			st.copied++
-		case statusNoDate:
-			st.noDate++
-		}
-
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", status, rec.src, dest, rec.date, rec.dateTag, hash)
 		if !cfg.quiet {
-			prefix := "copy  "
-			if status == statusNoDate {
-				prefix = "nodate"
-			}
-			if !cfg.apply {
-				prefix = "dry   "
-			}
+			prefix := statusPrefix(status, cfg.apply)
 			fmt.Fprintf(os.Stderr, "%s  %s -> %s\n", prefix, rec.src, dest)
 		}
 	}
@@ -246,6 +277,48 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 	}
 
 	return st
+}
+
+// undoStatus decrements the counter for a previously-tallied status when a
+// later file-operation failure reclassifies the row as an error.
+func undoStatus(st *stats, status string) {
+	switch status {
+	case statusCopied:
+		st.copied--
+	case statusNoDate:
+		st.noDate--
+	case statusSkippedDup:
+		st.skippedDup--
+	case statusRecopy:
+		st.recopy--
+	case statusDupRecopy:
+		st.dupRecopy--
+	case statusNoDateRecopy:
+		st.noDateRecopy--
+	}
+}
+
+// statusPrefix maps a status to the short stderr progress label.
+func statusPrefix(status string, apply bool) string {
+	if !apply {
+		return "dry   "
+	}
+	switch status {
+	case statusCopied:
+		return "copy  "
+	case statusNoDate:
+		return "nodate"
+	case statusSkippedDup:
+		return "dup   "
+	case statusRecopy:
+		return "recopy"
+	case statusDupRecopy:
+		return "duprec"
+	case statusNoDateRecopy:
+		return "ndrecp"
+	default:
+		return "error "
+	}
 }
 
 // planDestination computes the target path and status for a record.
@@ -260,7 +333,8 @@ func planDestination(dest string, rec fileRecord, hash string) (path, status str
 		return filepath.Join(dest, "unknown", hash+"."+rec.ext), statusNoDate
 	}
 
-	name := fmt.Sprintf("%s-%s.%s",
+	name := fmt.Sprintf(
+		"%s-%s.%s",
 		parsed.Format("2006-01-02-150405"),
 		hash, rec.ext,
 	)
@@ -283,7 +357,8 @@ func placeFile(cfg config, src, dest string) error {
 // and a function to wait for its exit. exiftool's -f flag makes missing tags
 // print as "-" instead of suppressing the line, so column count is stable.
 func startExiftool(src string) (*bufio.Scanner, func() error, error) {
-	cmd := exec.Command("exiftool",
+	cmd := exec.Command(
+		"exiftool",
 		"-q", "-q",
 		"-f",
 		"-p", exiftoolFormat(),
@@ -362,6 +437,25 @@ func contentHash(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:hashLen], nil
 }
 
+// sizesDiffer reports whether dest exists and has a different size than src.
+// Returns false (no recopy needed) when dest does not exist or when sizes match.
+// A size mismatch indicates either a truncated leftover from an aborted copy
+// or — under --keep-names — a genuinely different file sharing the dest name.
+func sizesDiffer(src, dest string) (bool, error) {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false, fmt.Errorf("stat source: %w", err)
+	}
+	dstInfo, err := os.Stat(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil // dest missing — fresh placement, no recopy
+		}
+		return false, fmt.Errorf("stat dest: %w", err)
+	}
+	return dstInfo.Size() != srcInfo.Size(), nil
+}
+
 // copyNoClobber copies src to dst. If dst already exists with the same size
 // (complete file from a prior run), it is silently skipped. A size mismatch
 // indicates a truncated file from an aborted copy — the dest is removed and
@@ -427,11 +521,14 @@ func printSummary(cfg config, st stats) {
 		op = "move"
 	}
 	fmt.Printf("\n=== summary (%s, %s) ===\n", mode, op)
-	fmt.Printf("copied:      %d\n", st.copied)
-	fmt.Printf("skipped-dup: %d\n", st.dup)
-	fmt.Printf("no-date:     %d\n", st.noDate)
-	fmt.Printf("errors:      %d\n", st.errors)
-	fmt.Printf("log:         %s\n", cfg.logPath)
+	fmt.Printf("copied:        %d\n", st.copied)
+	fmt.Printf("no-date:       %d\n", st.noDate)
+	fmt.Printf("skipped-dup:   %d\n", st.skippedDup)
+	fmt.Printf("recopy:        %d\n", st.recopy)
+	fmt.Printf("dup-recopy:    %d\n", st.dupRecopy)
+	fmt.Printf("no-date-recopy:%d\n", st.noDateRecopy)
+	fmt.Printf("errors:        %d\n", st.errors)
+	fmt.Printf("log:           %s\n", cfg.logPath)
 }
 
 // fatalf prints a formatted error to stderr and exits with code 1.

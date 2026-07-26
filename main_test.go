@@ -305,3 +305,104 @@ func TestCopyNoClobber_MissingSource(t *testing.T) {
 		t.Fatal("expected error for missing source")
 	}
 }
+
+func TestSizesDiffer(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.bin")
+	os.WriteFile(src, []byte("hello world"), 0o644)
+
+	t.Run("dest missing", func(t *testing.T) {
+		dest := filepath.Join(dir, "missing.bin")
+		got, err := sizesDiffer(src, dest)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if got {
+			t.Error("dest missing should not report sizes differ")
+		}
+	})
+
+	t.Run("same size", func(t *testing.T) {
+		dest := filepath.Join(dir, "same.bin")
+		os.WriteFile(dest, []byte("hello world"), 0o644)
+		got, err := sizesDiffer(src, dest)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if got {
+			t.Error("same-size dest should not report sizes differ")
+		}
+	})
+
+	t.Run("different size", func(t *testing.T) {
+		dest := filepath.Join(dir, "truncated.bin")
+		os.WriteFile(dest, []byte("hel"), 0o644)
+		got, err := sizesDiffer(src, dest)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if !got {
+			t.Error("different-size dest should report sizes differ")
+		}
+	})
+
+	t.Run("source missing", func(t *testing.T) {
+		dest := filepath.Join(dir, "same.bin")
+		_, err := sizesDiffer("/nonexistent", dest)
+		if err == nil {
+			t.Fatal("expected error for missing source")
+		}
+	})
+}
+
+func TestStatusPrefix(t *testing.T) {
+	tests := []struct {
+		status string
+		apply  bool
+		want   string
+	}{
+		{statusCopied, true, "copy  "},
+		{statusNoDate, true, "nodate"},
+		{statusSkippedDup, true, "dup   "},
+		{statusRecopy, true, "recopy"},
+		{statusDupRecopy, true, "duprec"},
+		{statusNoDateRecopy, true, "ndrecp"},
+		{statusError, true, "error "},
+		// dry-run overrides every status except error
+		{statusCopied, false, "dry   "},
+		{statusNoDate, false, "dry   "},
+		{statusSkippedDup, false, "dry   "},
+	}
+	for _, tt := range tests {
+		got := statusPrefix(tt.status, tt.apply)
+		if got != tt.want {
+			t.Errorf("statusPrefix(%q, apply=%v) = %q, want %q", tt.status, tt.apply, got, tt.want)
+		}
+	}
+}
+
+func TestUndoStatus(t *testing.T) {
+	st := stats{
+		copied:       3,
+		noDate:       2,
+		skippedDup:   1,
+		recopy:       1,
+		dupRecopy:    1,
+		noDateRecopy: 1,
+		errors:       0,
+	}
+	// Decrement each counter down to zero.
+	for range 3 {
+		undoStatus(&st, statusCopied)
+	}
+	for range 2 {
+		undoStatus(&st, statusNoDate)
+	}
+	undoStatus(&st, statusSkippedDup)
+	undoStatus(&st, statusRecopy)
+	undoStatus(&st, statusDupRecopy)
+	undoStatus(&st, statusNoDateRecopy)
+	if st != (stats{}) {
+		t.Errorf("stats not zeroed: %+v", st)
+	}
+}
