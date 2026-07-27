@@ -8,11 +8,11 @@ import (
 )
 
 func TestParseExifLine(t *testing.T) {
-	// Column order matches dateFallbackChain (11 tags) + path + ext = 13 cols:
+	// Column order matches dateFallbackChain (10 tags) + path + ext = 12 cols:
 	//   path \t SubSecDateTimeOriginal \t DateTimeOriginal \t CreateDate
 	//   \t IFD0:ModifyDate \t XMP:DateTimeOriginal \t XMP:CreateDate
 	//   \t XMP:ModifyDate \t TrackCreateDate \t QuickTime:CreateDate
-	//   \t FileModifyDate \t FileCreateDate \t ext
+	//   \t FileModifyDate \t ext
 	tests := []struct {
 		name string
 		line string
@@ -21,49 +21,49 @@ func TestParseExifLine(t *testing.T) {
 	}{
 		{
 			name: "DateTimeOriginal wins",
-			line: "photos/IMG_001.jpg\t-\t2020:05:23_14:23:01\t-\t-\t-\t-\t-\t-\t-\t-\t-\tjpg",
+			line: "photos/IMG_001.jpg\t-\t2020:05:23_14:23:01\t-\t-\t-\t-\t-\t-\t-\t-\tjpg",
 			want: fileRecord{src: "photos/IMG_001.jpg", date: "2020:05:23_14:23:01", dateTag: "DateTimeOriginal", ext: "jpg"},
 			ok:   true,
 		},
 		{
 			name: "SubSecDateTimeOriginal wins (burst photo)",
-			line: "photos/burst.heic\t2024:03:15_14:23:01.123\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\theic",
+			line: "photos/burst.heic\t2024:03:15_14:23:01.123\t-\t-\t-\t-\t-\t-\t-\t-\t-\theic",
 			want: fileRecord{src: "photos/burst.heic", date: "2024:03:15_14:23:01.123", dateTag: "SubSecDateTimeOriginal", ext: "heic"},
 			ok:   true,
 		},
 		{
 			name: "fallback to IFD0:ModifyDate (fourth column)",
-			line: "photos/scan.tif\t-\t-\t-\t2003:11:05_08:52:31\t-\t-\t-\t-\t-\t-\t-\ttif",
+			line: "photos/scan.tif\t-\t-\t-\t2003:11:05_08:52:31\t-\t-\t-\t-\t-\t-\ttif",
 			want: fileRecord{src: "photos/scan.tif", date: "2003:11:05_08:52:31", dateTag: "IFD0:ModifyDate", ext: "tif"},
 			ok:   true,
 		},
 		{
 			name: "XMP:DateTimeOriginal beats XMP:ModifyDate",
-			line: "photos/xmp.jpg\t-\t-\t-\t-\t2020:05:23_14:23:01\t-\t2020:05:24_10:00:00\t-\t-\t-\t-\tjpg",
+			line: "photos/xmp.jpg\t-\t-\t-\t-\t2020:05:23_14:23:01\t-\t2020:05:24_10:00:00\t-\t-\t-\tjpg",
 			want: fileRecord{src: "photos/xmp.jpg", date: "2020:05:23_14:23:01", dateTag: "XMP:DateTimeOriginal", ext: "jpg"},
 			ok:   true,
 		},
 		{
 			name: "XMP:CreateDate fallback (WhatsApp, EXIF stripped)",
-			line: "whatsapp/IMG-2022.jpg\t-\t-\t-\t-\t-\t2022:08:01_10:15:00\t-\t-\t-\t-\t-\tjpg",
+			line: "whatsapp/IMG-2022.jpg\t-\t-\t-\t-\t-\t2022:08:01_10:15:00\t-\t-\t-\t-\tjpg",
 			want: fileRecord{src: "whatsapp/IMG-2022.jpg", date: "2022:08:01_10:15:00", dateTag: "XMP:CreateDate", ext: "jpg"},
 			ok:   true,
 		},
 		{
 			name: "fallback to FileModifyDate (tenth column)",
-			line: "photos/nodate.jpg\t-\t-\t-\t-\t-\t-\t-\t-\t-\t2020:05:23_04:01:00\t-\tjpg",
+			line: "photos/nodate.jpg\t-\t-\t-\t-\t-\t-\t-\t-\t-\t2020:05:23_04:01:00\tjpg",
 			want: fileRecord{src: "photos/nodate.jpg", date: "2020:05:23_04:01:00", dateTag: "FileModifyDate", ext: "jpg"},
 			ok:   true,
 		},
 		{
 			name: "all dates missing",
-			line: "photos/unknown.bin\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\tbin",
+			line: "photos/unknown.bin\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\tbin",
 			want: fileRecord{src: "photos/unknown.bin", date: "", dateTag: "", ext: "bin"},
 			ok:   true,
 		},
 		{
 			name: "QuickTime:CreateDate for video",
-			line: "video/clip.mov\t-\t-\t2014:12:31_23:09:08\t-\t-\t-\t-\t2014:12:31_23:09:08\t2014:12:31_23:09:08\t-\t-\tmov",
+			line: "video/clip.mov\t-\t-\t2014:12:31_23:09:08\t-\t-\t-\t-\t2014:12:31_23:09:08\t2014:12:31_23:09:08\t-\tmov",
 			want: fileRecord{src: "video/clip.mov", date: "2014:12:31_23:09:08", dateTag: "CreateDate", ext: "mov"},
 			ok:   true,
 		},

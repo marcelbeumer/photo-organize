@@ -80,7 +80,6 @@ var dateFallbackChain = []string{
 	"TrackCreateDate",        // video track creation date
 	"QuickTime:CreateDate",   // QuickTime container creation date (corrected by -api QuickTimeUTC)
 	"FileModifyDate",         // filesystem mtime (last resort)
-	"FileCreateDate",         // filesystem ctime (last resort)
 }
 
 // junkExts are file extensions (lowercase, without dot) to skip entirely.

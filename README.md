@@ -74,7 +74,6 @@ the first non-empty value:
 8. `TrackCreateDate` — video track creation date
 9. `QuickTime:CreateDate` — QuickTime container creation date (corrected to local time via `-api QuickTimeUTC`)
 10. `FileModifyDate` — filesystem mtime (last resort)
-11. `FileCreateDate` — filesystem ctime (last resort)
 
 Files with no recoverable date are placed in `unknown/`.
 
