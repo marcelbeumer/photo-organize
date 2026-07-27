@@ -81,3 +81,24 @@ Files with no recoverable date are placed in `unknown/`.
 the true capture date. Check `dateSourceTag` in the log to identify these.
 
 The log file (TSV) records the source tag for each file so dates can be audited.
+
+## Timezones
+
+Dates resolve to the **local time of the host running the tool**:
+
+- **Images**: `DateTimeOriginal`/`SubSecDateTimeOriginal`/`CreateDate` are
+  stored naive (no offset) in EXIF. iPhone HEICs also carry `OffsetTime*`
+  tags, but exiftool does not shift the date value, so it is used as-is —
+  the local time the camera captured at. Pre-smartphone cameras and
+  EXIF-stripped files carry no timezone at all. Either way the naive value
+  is the best available signal and is used verbatim.
+- **Videos**: QuickTime/MP4 `CreateDate` is stored as UTC seconds since
+  epoch. exiftool's `-api QuickTimeUTC` converts it to host-local before
+  the tool reads it, so a `.mov`/`.mp4` resolves to the host's local time,
+  not the capture-location local time.
+
+Consequence: re-running the tool on a host in a different timezone than
+the original run will produce **different dates for video files** (and for
+`FileModifyDate`-resolved files, since mtime changes on copy). Run the tool
+on a host whose timezone matches the original import/capture timezone, or
+accept that video dates reflect where the tool ran.
