@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -54,6 +55,10 @@ const dateLayout = "2006:01:02_15:04:05"
 // hashLen is the number of hex characters retained from the sha1 digest.
 // 12 hex chars = 48 bits of entropy, collision-safe for personal photo libraries.
 const hashLen = 12
+
+// dateSourceTag value written to the log when the date was recovered from the
+// filename via --from-filenames (no embedded EXIF date present).
+const dateTagFileName = "FileName"
 
 // Processing status values written to the log.
 const (
@@ -100,13 +105,14 @@ var junkBases = map[string]bool{
 
 // config holds the resolved CLI flags.
 type config struct {
-	src       string
-	dest      string
-	apply     bool
-	move      bool
-	quiet     bool
-	keepNames bool
-	logPath   string
+	src           string
+	dest          string
+	apply         bool
+	move          bool
+	quiet         bool
+	keepNames     bool
+	fromFilenames bool
+	logPath       string
 }
 
 // stats tracks the outcome of processing each file. Each status has its
@@ -165,6 +171,7 @@ func parseFlags() config {
 	move := flag.Bool("move", false, "move instead of copy")
 	quiet := flag.Bool("quiet", false, "suppress per-file progress output")
 	keepNames := flag.Bool("keep-names", false, "preserve original filenames instead of <date>-<hash>.<ext>")
+	fromFilenames := flag.Bool("from-filenames", false, "when a file has no embedded date, parse the date from its <YYYY-MM-DD>-<HHMMSS>-<hash>.<ext> filename instead of falling back to FileModifyDate")
 	logPath := flag.String("log", "organize.log.tsv", "log file path")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -180,13 +187,14 @@ func parseFlags() config {
 	}
 
 	return config{
-		src:       *src,
-		dest:      *dest,
-		apply:     *apply,
-		move:      *move,
-		quiet:     *quiet,
-		keepNames: *keepNames,
-		logPath:   *logPath,
+		src:           *src,
+		dest:          *dest,
+		apply:         *apply,
+		move:          *move,
+		quiet:         *quiet,
+		keepNames:     *keepNames,
+		fromFilenames: *fromFilenames,
+		logPath:       *logPath,
 	}
 }
 
@@ -207,6 +215,19 @@ func process(cfg config, scanner *bufio.Scanner, logFile *os.File) stats {
 		}
 		if isJunk(rec.src, rec.ext) {
 			continue
+		}
+
+		// --from-filenames: when no embedded date was found and the chain
+		// fell to FileModifyDate (or nothing), recover the date from the
+		// filename if it matches the tool's own <YYYY-MM-DD>-<HHMMSS>-<hash>
+		// scheme. This lets re-running the tool against its own output
+		// deterministically re-resolve EXIF-stripped files whose mtime
+		// drifted on copy, instead of trusting the now-wrong mtime.
+		if cfg.fromFilenames && (rec.dateTag == "FileModifyDate" || rec.dateTag == "") {
+			if fd, ok := dateFromFilename(rec.src); ok {
+				rec.date = fd
+				rec.dateTag = dateTagFileName
+			}
 		}
 
 		// Hashing is skipped in --keep-names mode: the original filename is
@@ -439,6 +460,27 @@ func startExiftool(src string) (*bufio.Scanner, func() error, error) {
 
 	return scanner, waitFn, nil
 }
+
+// dateFromFilename tries to extract a capture date from a filename laid out
+// as <YYYY-MM-DD>-<HHMMSS>-<hash>.<ext> (the tool's own output scheme).
+// Returns the date in exiftoolDateFormat (YYYY:MM:DD_HH:MM:SS) and ok=true.
+// Used by --from-filenames so re-running the tool against its own output
+// recovers the date for EXIF-stripped files whose FileModifyDate drifted on
+// copy, instead of falling back to the now-wrong mtime.
+func dateFromFilename(path string) (string, bool) {
+	base := filepath.Base(path)
+	m := filenameDateRe.FindStringSubmatch(base)
+	if m == nil {
+		return "", false
+	}
+	// m = [full, YYYY, MM, DD, HHMMSS]; produce 2006:01:02_15:04:05.
+	return m[1] + ":" + m[2] + ":" + m[3] + "_" +
+		m[4][0:2] + ":" + m[4][2:4] + ":" + m[4][4:6], true
+}
+
+// filenameDateRe matches the leading <YYYY-MM-DD>-<HHMMSS> part of the tool's
+// own output filenames. Captures: [1]=YYYY, [2]=MM, [3]=DD, [4]=HHMMSS.
+var filenameDateRe = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})-(\d{6})-`)
 
 // parseExifLine parses one TSV line from exiftool's -p output.
 // Expected columns: path, 9 date columns, ext (11 total).

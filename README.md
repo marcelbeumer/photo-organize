@@ -18,7 +18,7 @@ Requires [exiftool](https://exiftool.org/):
 ## Usage
 
 ```
-photo-organize --src DIR --dest DIR [--apply] [--move] [--keep-names] [--log FILE]
+photo-organize --src DIR --dest DIR [--apply] [--move] [--keep-names] [--from-filenames] [--log FILE]
 ```
 
 `--src` is scanned recursively: all files in subdirectories are included.
@@ -34,6 +34,7 @@ Flags:
 - `--move` — move instead of copy
 - `--quiet` — suppress per-file progress output to stderr
 - `--keep-names` — preserve original filenames instead of `<date>-<hash>.<ext>`
+- `--from-filenames` — when a file has no embedded date, recover the date from its `<YYYY-MM-DD>-<HHMMSS>-<hash>.<ext>` filename instead of falling back to `FileModifyDate`
 - `--log` — log file path (default `organize.log.tsv`)
 
 ## Output layout
@@ -102,3 +103,22 @@ the original run will produce **different dates for video files** (and for
 `FileModifyDate`-resolved files, since mtime changes on copy). Run the tool
 on a host whose timezone matches the original import/capture timezone, or
 accept that video dates reflect where the tool ran.
+
+## Re-running against the tool's own output
+
+To re-organize an already-processed tree (e.g. to verify a previous run or
+move into a fresh layout), point `--src` at the existing output and `--dest`
+at a new directory. Pass `--from-filenames` so that files which carry no
+embedded EXIF date recover their date from the tool's own
+`<YYYY-MM-DD>-<HHMMSS>-<hash>.<ext>` filename instead of falling back to
+`FileModifyDate`.
+
+This matters because the last-resort `FileModifyDate` is a filesystem
+timestamp that does not survive copies made without `-p`/`--times`
+(`rsync -a`, `cp -p` preserve it; plain `cp` and most archive/sync tools
+reset it to the copy time). For EXIF-stripped files — typically WhatsApp
+exports, screenshots, edited images — the filename is the only durable
+record of the date the tool originally resolved. `--from-filenames` makes
+the re-run deterministic regardless of how the source tree was copied.
+
+Files that already carry embedded EXIF dates are unaffected by the flag.

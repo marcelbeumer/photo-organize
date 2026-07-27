@@ -497,3 +497,60 @@ func TestStripSubsec(t *testing.T) {
 		}
 	}
 }
+
+func TestDateFromFilename(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+		ok   bool
+	}{
+		{
+			name: "standard output name with hash",
+			path: "/dest/2025/06/2025-06-16-143343-45bc6f728182.jpg",
+			want: "2025:06:16_14:33:43",
+			ok:   true,
+		},
+		{
+			name: "year boundary",
+			path: "2014/12/2014-12-31-230908-3123113e3cc4.mov",
+			want: "2014:12:31_23:09:08",
+			ok:   true,
+		},
+		{
+			name: "unknown bucket no date prefix",
+			path: "/dest/unknown/45bc6f728182.jpg",
+			want: "",
+			ok:   false,
+		},
+		{
+			name: "keep-names original name without date prefix",
+			path: "/dest/2025/06/IMG_001.jpg",
+			want: "",
+			ok:   false,
+		},
+		{
+			name: "filename with too few digits in time",
+			path: "/dest/2025/06/2025-06-16-1433-45bc6f728182.jpg",
+			want: "",
+			ok:   false,
+		},
+		{
+			name: "filename with no hash suffix",
+			path: "/dest/2025/06/2025-06-16-143343.jpg",
+			want: "",
+			ok:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := dateFromFilename(tt.path)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Errorf("date = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
